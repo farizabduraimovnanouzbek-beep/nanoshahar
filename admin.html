@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>NanoShahar — админка</title>
+<link href="https://fonts.googleapis.com/css2?family=Unbounded:wght@800&family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+<style>
+body{margin:0;font-family:Inter,system-ui,sans-serif;background:#F6F1E6;color:#1E1A14}
+main{max-width:860px;margin:0 auto;padding:20px 14px 60px}
+h1{font-family:Unbounded,sans-serif;font-size:20px}
+h2{font-size:17px;margin:28px 0 10px}
+.card{background:#fff;border-radius:14px;padding:14px;margin:10px 0;box-shadow:0 1px 4px rgba(0,0,0,.06)}
+input,textarea,select{font:inherit;font-size:15px;border:1.5px solid #E8DFCC;border-radius:10px;padding:10px;width:100%;box-sizing:border-box;background:#FFFDF8}
+textarea{min-height:120px}
+button{font:inherit;font-weight:700;border:none;border-radius:10px;padding:10px 14px;cursor:pointer;background:#1F4E8C;color:#fff;min-height:44px}
+button.ok{background:#2E7D32}button.no{background:#B3261E}button.gray{background:#E8DFCC;color:#1E1A14}
+.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.muted{color:#5B5040;font-size:13px}
+.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+@media(max-width:560px){.grid{grid-template-columns:minmax(0,1fr)}}
+label{font-size:12px;font-weight:600;color:#5B5040}
+.hide{display:none}
+</style>
+</head>
+<body>
+<main>
+  <h1>NANOSHAHAR · админка</h1>
+  <section id="login" class="card">
+    <p>Войди по почте — придёт письмо со ссылкой.</p>
+    <div class="row"><input id="email" type="email" placeholder="почта" style="flex:1"><button id="send">Получить ссылку</button></div>
+    <p class="muted" id="lmsg"></p>
+  </section>
+  <section id="app" class="hide">
+    <div class="row" style="justify-content:space-between"><span class="muted" id="who"></span><button class="gray" id="out">Выйти</button></div>
+
+    <h2>Заказы, ждут оплаты</h2>
+    <div id="orders"><p class="muted">Загрузка…</p></div>
+
+    <h2>Добавить дома списком</h2>
+    <div class="card">
+      <p class="muted">Вставь ники (каждый с новой строки, можно с @). Каждый получит бесплатный дом в случайной махалле.</p>
+      <textarea id="bulk" placeholder="@nick1&#10;@nick2"></textarea>
+      <div class="row" style="margin-top:8px"><button id="bulkGo">Добавить</button><span class="muted" id="bulkMsg"></span></div>
+    </div>
+
+    <h2>Найти и изменить дом/здание</h2>
+    <div class="card">
+      <div class="row"><input id="q" placeholder="ник или название" style="flex:1"><button id="qGo">Найти</button></div>
+      <div id="found"></div>
+    </div>
+  </section>
+</main>
+<script src="config.js"></script>
+<script type="module" src="admin.js"></script>
+</body>
+</html>
