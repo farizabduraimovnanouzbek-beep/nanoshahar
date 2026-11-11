@@ -237,6 +237,7 @@ function fitCity() {
 const sx = (x) => (x - view.x) * view.s, sy = (y) => (y - view.y) * view.s;
 const wx = (px) => px / view.s + view.x, wy = (py) => py / view.s + view.y;
 function zoomAt(px, py, f) {
+  if (!isFinite(f) || f <= 0) return;
   const ns = Math.max(minS, Math.min(maxS, view.s * f));
   const mx = wx(px), my = wy(py); view.s = ns; view.x = mx - px / ns; view.y = my - py / ns; draw();
 }
@@ -270,6 +271,7 @@ function shade(hex, k) { const [r, g, b] = hex2rgb(hex); const f = (v) => Math.m
 
 function render() {
   pending = false;
+  if (!isFinite(view.s) || !isFinite(view.x) || !isFinite(view.y) || view.s <= 0) Object.assign(view, fitCity());
   const s = view.s, cp = cell * s;
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx.fillStyle = '#E3DCCB'; ctx.fillRect(0, 0, vw, vh);
@@ -438,7 +440,7 @@ cv.addEventListener('pointermove', (e) => {
   const ps = [...ptrs.values()];
   if (gesture.mode === 'pan' && ps.length === 1) {
     view.x = gesture.vx - (ps[0].x - gesture.x) / view.s; view.y = gesture.vy - (ps[0].y - gesture.y) / view.s; draw();
-  } else if (gesture.mode === 'pinch' && ps.length >= 2) {
+  } else if (gesture.mode === 'pinch' && ps.length >= 2 && gesture.d > 10) {
     const [a, b] = ps; const cx = (a.x + b.x) / 2, cy = (a.y + b.y) / 2;
     const ns = Math.max(minS, Math.min(maxS, gesture.s * Math.hypot(a.x - b.x, a.y - b.y) / gesture.d));
     view.s = ns; view.x = gesture.wxm - cx / ns; view.y = gesture.wym - cy / ns; draw();
