@@ -10,8 +10,14 @@ window.NS_CONFIG = {
   // Куда присылать чек
   CONTACT_INSTAGRAM: "nanouzbek",
 
-  // Цена одного этажа (сум) по зонам
-  FLOOR_PRICE: { center: 100000, middle: 50000, mahalla: 20000 },
+  // Цена одного этажа (сум):
+  // в центре (до 1,5 км от сквера Амира Темура / Tashkent City) — PRICE_CENTER,
+  // дальше цена падает вдвое каждые PRICE_HALF_KM километров, но не ниже PRICE_MIN.
+  // Рядом с Чорсу, Хазрати Имамом, телебашней и Magic City — дороже на LANDMARK_BONUS.
+  PRICE_CENTER: 299000,
+  PRICE_HALF_KM: 2.5,
+  PRICE_MIN: 15000,
+  LANDMARK_BONUS: 1.2,
 
   // Сколько этажей нужно, чтобы здание было видно издалека
   TIER_DISTRICT: 15, // видно при приближении к району

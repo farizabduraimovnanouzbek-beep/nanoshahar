@@ -24,7 +24,7 @@ const T = {
     buy_title: "Joy sotib olish", buy_more_title: "Qavat qo'shish",
     buy_text: "Qancha ko'p qavat — shuncha uzoqdan ko'rinadi.",
     name: "Nomi (brend yoki nik)", contact: "Telefon yoki Instagram", link: "Havola (ixtiyoriy)",
-    how_many: "Qavatlar soni", total: "Jami",
+    how_many: "Qavatlar soni", total: "Jami", floor_price: "1 qavat narxi",
     tier_street: "Faqat yaqindan ko'rinadi", tier_district: "Tuman darajasida ko'rinadi", tier_legend: "Butun shahar ko'radi — AFSONA",
     order_go: "Buyurtma berish", ordering: "Yuborilmoqda…",
     need_name: "Nom va kontaktni yozing",
@@ -53,7 +53,7 @@ const T = {
     buy_title: "Купить место", buy_more_title: "Достроить этажи",
     buy_text: "Чем больше этажей — тем издалека видно здание.",
     name: "Название (бренд или ник)", contact: "Телефон или Instagram", link: "Ссылка (необязательно)",
-    how_many: "Сколько этажей", total: "Итого",
+    how_many: "Сколько этажей", total: "Итого", floor_price: "Цена 1 этажа",
     tier_street: "Видно только вблизи", tier_district: "Видно на уровне района", tier_legend: "Видно на весь город — ЛЕГЕНДА",
     order_go: "Оформить заказ", ordering: "Отправляем…",
     need_name: "Укажи название и контакт",
@@ -130,7 +130,7 @@ async function initDB() {
 
 // ---------- city ----------
 let C, W, H, cols, rows, cell;
-let isPlot, zoneOf, distOf, blocked;
+let isPlot, zoneOf, distOf, blocked, plotPrice;
 const places = new Map(); // plot -> place
 const byNick = new Map();
 let layer, layerCtx, layerImg;
@@ -193,16 +193,32 @@ async function loadCity() {
     zoneOf[i] = d < 1500 ? 0 : d < 4000 ? 1 : 2;
     for (const l of LM) if (Math.hypot(x - l.x, y - l.y) < 110) blocked[i] = 1;
   }
+  plotPrice = new Uint32Array(cols * rows);
+  const bonusLM = LM.filter((l) => ['Chorsu', 'Hazrati Imom', 'Teleminora', 'Magic City'].includes(l.n));
+  for (let i = 0; i < cols * rows; i++) {
+    if (!isPlot[i]) continue;
+    const x = (i % cols + 0.5) * cell, y = ((i / cols | 0) + 0.5) * cell;
+    const d = Math.min(Math.hypot(x - AT.x, y - AT.y), Math.hypot(x - TC.x, y - TC.y));
+    let p = d <= 1500 ? CFG.PRICE_CENTER : CFG.PRICE_CENTER * Math.pow(0.5, (d - 1500) / (CFG.PRICE_HALF_KM * 1000));
+    if (bonusLM.some((l) => Math.hypot(x - l.x, y - l.y) < 700)) p *= CFG.LANDMARK_BONUS;
+    plotPrice[i] = Math.max(CFG.PRICE_MIN, Math.min(CFG.PRICE_CENTER, Math.round(p / 1000) * 1000));
+  }
   layer = document.createElement('canvas'); layer.width = cols; layer.height = rows;
   layerCtx = layer.getContext('2d'); layerImg = layerCtx.createImageData(cols, rows);
   for (let i = 0; i < cols * rows; i++) if (isPlot[i]) setLayerPx(i);
   layerCtx.putImageData(layerImg, 0, 0);
 }
 const zoneName = (i) => ['center', 'middle', 'mahalla'][zoneOf[i]];
+function priceColor(i) {
+  const k = Math.max(0, Math.min(1, Math.log(plotPrice[i] / CFG.PRICE_MIN) / Math.log(CFG.PRICE_CENTER / CFG.PRICE_MIN)));
+  const a = ZC.mahalla, m = ZC.middle, b = ZC.center;
+  const mix = (u, v, t) => u.map((x, j) => Math.round(x + (v[j] - x) * t));
+  return k < 0.5 ? mix(a, m, k * 2) : mix(m, b, (k - 0.5) * 2);
+}
 function hex2rgb(h) { const n = parseInt(h.slice(1), 16); return [n >> 16, (n >> 8) & 255, n & 255]; }
 function setLayerPx(i) {
   const p = places.get(i);
-  const c = p ? hex2rgb(p.color || '#C8553D') : blocked[i] ? [225, 217, 200] : ZC[zoneName(i)];
+  const c = p ? hex2rgb(p.color || '#C8553D') : blocked[i] ? [225, 217, 200] : priceColor(i);
   const o = i * 4; layerImg.data[o] = c[0]; layerImg.data[o + 1] = c[1]; layerImg.data[o + 2] = c[2]; layerImg.data[o + 3] = 255;
 }
 function addPlace(p, redrawLayer = true) {
@@ -307,7 +323,7 @@ function render() {
           ctx.fillStyle = shade(col, 0.6); ctx.fillRect(x + sz * 0.42, y + sz * 0.68, sz * 0.16, sz * 0.28);
         } else { ctx.fillStyle = p.color || '#C8553D'; ctx.fillRect(x, y, sz, sz); }
       } else {
-        const z = ZC[zoneName(i)]; ctx.fillStyle = blocked[i] ? '#E1D9C8' : `rgb(${z[0]},${z[1]},${z[2]})`;
+        const z = priceColor(i); ctx.fillStyle = blocked[i] ? '#E1D9C8' : `rgb(${z[0]},${z[1]},${z[2]})`;
         ctx.fillRect(x, y, sz, sz);
         if (cp > 20) { ctx.strokeStyle = 'rgba(160,130,80,.25)'; ctx.lineWidth = 1 / s; ctx.strokeRect(x, y, sz, sz); }
       }
@@ -502,7 +518,8 @@ function selectPlot(i) {
   const p = places.get(i); const z = zoneName(i);
   let html = `<h2>${p ? esc(p.name || '@' + p.nick) : t('plot') + ' #' + i}</h2>
     <div class="row"><span>${t('district')}</span><b>${esc(distName(i))}</b></div>
-    <div class="row"><span>${t('zone')}</span><b>${t('zone_' + z)}</b></div>`;
+    <div class="row"><span>${t('zone')}</span><b>${t('zone_' + z)}</b></div>
+    <div class="row"><span>${t('floor_price')}</span><b>${fmt(plotPrice[i])} ${t('sum')}</b></div>`;
   if (blocked[i]) { openSheet(html + `<p>${t('landmark')}</p>`); return; }
   if (p) {
     html += `<div class="row"><span>${t('floors')}</span><b>${p.floors || 1}</b></div>
@@ -586,7 +603,7 @@ function findNick(q) {
   selected = i; flyTo((i % cols + 0.5) * cell, ((i / cols | 0) + 0.5) * cell, 0.6, 1400); return true;
 }
 function buyForm(i, place) {
-  const z = zoneName(i); const price = CFG.FLOOR_PRICE[z];
+  const z = zoneName(i); const price = plotPrice[i];
   const base = place ? place.floors || 1 : 0;
   let floors = 5, color = place?.color || '#1F4E8C';
   const presets = [5, 15, 50, 100];
