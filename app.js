@@ -24,7 +24,7 @@ const T = {
     buy_title: "Joy sotib olish", buy_more_title: "Qavat qo'shish",
     buy_text: "Qancha ko'p qavat — shuncha uzoqdan ko'rinadi.",
     name: "Nomi (brend yoki nik)", contact: "Telefon yoki Instagram", link: "Havola (ixtiyoriy)",
-    how_many: "Qavatlar soni", total: "Jami", floor_price: "1 qavat narxi",
+    how_many: "Qavatlar soni", total: "Jami", floor_price: "Yer narxi", floors_n: "qavat", land: "Yer (1-qavat bilan)", floors_cost: "Qavatlar",
     tier_street: "Faqat yaqindan ko'rinadi", tier_district: "Tuman darajasida ko'rinadi", tier_legend: "Butun shahar ko'radi — AFSONA",
     order_go: "Buyurtma berish", ordering: "Yuborilmoqda…",
     need_name: "Nom va kontaktni yozing",
@@ -53,7 +53,7 @@ const T = {
     buy_title: "Купить место", buy_more_title: "Достроить этажи",
     buy_text: "Чем больше этажей — тем издалека видно здание.",
     name: "Название (бренд или ник)", contact: "Телефон или Instagram", link: "Ссылка (необязательно)",
-    how_many: "Сколько этажей", total: "Итого", floor_price: "Цена 1 этажа",
+    how_many: "Сколько этажей", total: "Итого", floor_price: "Цена участка", floors_n: "этажей", land: "Участок (с 1-м этажом)", floors_cost: "Этажи",
     tier_street: "Видно только вблизи", tier_district: "Видно на уровне района", tier_legend: "Видно на весь город — ЛЕГЕНДА",
     order_go: "Оформить заказ", ordering: "Отправляем…",
     need_name: "Укажи название и контакт",
@@ -602,31 +602,38 @@ function findNick(q) {
   if (i == null) return false;
   selected = i; flyTo((i % cols + 0.5) * cell, ((i / cols | 0) + 0.5) * cell, 0.6, 1400); return true;
 }
+function floorsCost(base, n) { let s = 0; for (let k = base + 1; k <= base + n; k++) s += CFG.FLOOR_BASE * (1 + k / CFG.FLOOR_GROWTH); return Math.round(s / 1000) * 1000; }
 function buyForm(i, place) {
-  const z = zoneName(i); const price = plotPrice[i];
-  const base = place ? place.floors || 1 : 0;
-  let floors = 5, color = place?.color || '#1F4E8C';
-  const presets = [5, 15, 50, 100];
+  const z = zoneName(i); const land = place ? 0 : plotPrice[i];
+  const base = place ? place.floors || 1 : 1;
+  let floors = place ? 5 : 4, color = place?.color || '#1F4E8C';
+  const presets = place ? [5, 15, 50] : [1, 4, 14, 49];
+  const minF = 1;
   openSheet(`<h2>${place ? t('buy_more_title') : t('buy_title')}</h2><p>${t('buy_text')}</p>
     <div class="row"><span>${t('district')} · ${t('zone')}</span><b>${esc(distName(i))} · ${t('zone_' + z)}</b></div>
     ${place ? '' : `<div class="field"><label for="nm">${t('name')}</label><input id="nm" maxlength="40"></div>`}
     <div class="field"><label for="ct">${t('contact')}</label><input id="ct" maxlength="60" inputmode="text"></div>
     ${place ? '' : `<div class="field"><label for="ln">${t('link')}</label><input id="ln" maxlength="120" placeholder="instagram.com/..."></div>`}
     <div class="field"><label>${t('how_many')}</label>
-      <div class="chips">${presets.map((n) => `<button type="button" class="chip ${n === floors ? 'on' : ''}" data-n="${n}">+${n}</button>`).join('')}
-      <input id="fl" type="number" min="1" max="500" value="${floors}" style="width:90px;height:40px"></div></div>
+      <div class="chips">${presets.map((n) => `<button type="button" class="chip" data-n="${n}">+${n}</button>`).join('')}
+      <input id="fl" type="number" min="${minF}" max="500" value="${floors}" style="width:90px;height:40px"></div></div>
     ${place ? '' : `<div class="field"><label>${t('color')}</label>${swatchesHtml(color)}</div>`}
-    <div class="note"><span class="tag" id="tier"></span><div style="display:flex;justify-content:space-between;align-items:baseline;margin-top:8px"><span>${t('total')}</span><span class="price" id="pr"></span></div></div>
+    <div class="note"><span class="tag" id="tier"></span>
+      ${place ? '' : `<div class="row"><span>${t('land')}</span><b>${fmt(land)} ${t('sum')}</b></div>`}
+      <div class="row"><span>${t('floors_cost')} <span id="fn"></span></span><b id="fc"></b></div>
+      <div style="display:flex;justify-content:space-between;align-items:baseline;margin-top:8px"><span>${t('total')}</span><span class="price" id="pr"></span></div></div>
     <div class="err" id="er"></div>
     <button class="primary" id="go">${t('order_go')}</button>`, (el) => {
     const upd = () => {
       const tot = base + floors; const tr = tierOf(tot);
-      el.querySelector('#tier').textContent = `${tot} ${t('floors').toLowerCase()} · ` + (tr === 3 ? t('tier_legend') : tr === 2 ? t('tier_district') : t('tier_street'));
-      el.querySelector('#pr').textContent = `${fmt(floors * price)} ${t('sum')}`;
+      el.querySelector('#tier').textContent = `${tot} ${t('floors_n')} · ` + (tr === 3 ? t('tier_legend') : tr === 2 ? t('tier_district') : t('tier_street'));
+      el.querySelector('#fn').textContent = `(+${floors})`;
+      el.querySelector('#fc').textContent = `${fmt(floorsCost(base, floors))} ${t('sum')}`;
+      el.querySelector('#pr').textContent = `${fmt(land + floorsCost(base, floors))} ${t('sum')}`;
       el.querySelectorAll('.chip').forEach((c) => c.classList.toggle('on', +c.dataset.n === floors));
     };
     el.querySelectorAll('.chip').forEach((c) => (c.onclick = () => { floors = +c.dataset.n; el.querySelector('#fl').value = floors; upd(); }));
-    el.querySelector('#fl').oninput = (e) => { floors = Math.max(1, Math.min(500, +e.target.value || 1)); upd(); };
+    el.querySelector('#fl').oninput = (e) => { floors = Math.max(minF, Math.min(500, +e.target.value || 0)); upd(); };
     if (!place) bindSwatches(el, (c) => (color = c));
     upd();
     const go = el.querySelector('#go');
@@ -635,7 +642,7 @@ function buyForm(i, place) {
       const contact = el.querySelector('#ct').value.trim();
       if (!name || !contact) { el.querySelector('#er').textContent = t('need_name'); return; }
       go.disabled = true; go.textContent = t('ordering');
-      const amount = floors * price;
+      const amount = land + floorsCost(base, floors);
       const res = await DB.order({ plot: i, place_id: place?.id, floors, name, contact, color, link: place ? null : el.querySelector('#ln').value.trim(), amount });
       go.disabled = false; go.textContent = t('order_go');
       if (res.error) { el.querySelector('#er').textContent = t('err'); return; }
