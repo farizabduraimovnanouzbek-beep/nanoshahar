@@ -234,43 +234,57 @@ function updateStats() { const el = $('#stats'); if (el && C) el.textContent = t
 // ---------- view ----------
 const cv = $('#map'); const ctx = cv.getContext('2d');
 let dpr = 1, vw = 0, vh = 0;
-const view = { s: 0.01, x: 0, y: 0 };
+const view = { s: 0.01, cx: 0, cy: 0, tilt: 0 };
 let minS = 0.005; const maxS = 2.2;
-let selected = null; let pickMode = false;
+let selected = null;
 function resize() {
   dpr = Math.min(window.devicePixelRatio || 1, 2); vw = innerWidth; vh = innerHeight;
   cv.width = vw * dpr; cv.height = vh * dpr; draw();
 }
+let MT = { a: 1, b: 0, c: 0, d: 1, e: 0, f: 0 };
+function mat() {
+  const t = view.tilt, ang = t * Math.PI / 4, k = 1 - t * 0.45, s = view.s;
+  const co = Math.cos(ang), si = Math.sin(ang);
+  const a = co * s, b = si * s * k, c = -si * s, d = co * s * k;
+  MT = { a, b, c, d, e: vw / 2 - (a * view.cx + c * view.cy), f: vh / 2 - (b * view.cx + d * view.cy) };
+  return MT;
+}
+const toS = (x, y) => [MT.a * x + MT.c * y + MT.e, MT.b * x + MT.d * y + MT.f];
+function linInv(dx, dy) { const { a, b, c, d } = MT; const det = a * d - b * c; return [(d * dx - c * dy) / det, (-b * dx + a * dy) / det]; }
+function toW(px, py) { const [ux, uy] = linInv(px - MT.e, py - MT.f); return [ux, uy]; }
+function anchor(wxp, wyp, px, py) { mat(); const [ux, uy] = linInv(px - vw / 2, py - vh / 2); view.cx = wxp - ux; view.cy = wyp - uy; mat(); }
 function fitCity() {
-  // bounds of city polygon
   let x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9;
   for (const r of C.city) for (let i = 0; i < r.length; i += 2) { x0 = Math.min(x0, r[i]); x1 = Math.max(x1, r[i]); y0 = Math.min(y0, r[i + 1]); y1 = Math.max(y1, r[i + 1]); }
-  const padTop = 80, padBot = 90;
-  const s = Math.min(vw / (x1 - x0), (vh - padTop - padBot) / (y1 - y0)) * 0.98;
+  const s = Math.min(vw / (x1 - x0), (vh - 170) / (y1 - y0)) * 0.98;
   minS = s * 0.7;
-  return { s, x: (x0 + x1) / 2 - vw / 2 / s, y: (y0 + y1) / 2 - (vh + padTop - padBot) / 2 / s };
+  return { s, cx: (x0 + x1) / 2, cy: (y0 + y1) / 2 + 5 / s };
 }
-const sx = (x) => (x - view.x) * view.s, sy = (y) => (y - view.y) * view.s;
-const wx = (px) => px / view.s + view.x, wy = (py) => py / view.s + view.y;
+const clampS = (v) => Math.max(minS, Math.min(maxS, v));
 function zoomAt(px, py, f) {
   if (!isFinite(f) || f <= 0) return;
-  const ns = Math.max(minS, Math.min(maxS, view.s * f));
-  const mx = wx(px), my = wy(py); view.s = ns; view.x = mx - px / ns; view.y = my - py / ns; draw();
+  mat(); const [x, y] = toW(px, py); view.s = clampS(view.s * f); anchor(x, y, px, py); draw();
 }
 let anim = null;
-function flyTo(x, y, s, ms = 900) {
+function animate(to, ms, focus) {
   cancelAnimationFrame(anim);
-  const a = { ...view }; const b = { s, x: x - vw / 2 / s, y: y - (vh / 2 - 40) / s }; const t0 = performance.now();
+  const a = { ...view }; const t0 = performance.now();
   const step = (now) => {
     let k = Math.min(1, (now - t0) / ms); k = k < 0.5 ? 2 * k * k : 1 - Math.pow(-2 * k + 2, 2) / 2;
-    const ls = Math.exp(Math.log(a.s) + (Math.log(b.s) - Math.log(a.s)) * k);
-    const cxw = (a.x + vw / 2 / a.s) + ((b.x + vw / 2 / b.s) - (a.x + vw / 2 / a.s)) * k;
-    const cyw = (a.y + vh / 2 / a.s) + ((b.y + vh / 2 / b.s) - (a.y + vh / 2 / a.s)) * k;
-    view.s = ls; view.x = cxw - vw / 2 / ls; view.y = cyw - vh / 2 / ls; draw();
-    if (k < 1) anim = requestAnimationFrame(step);
+    view.s = Math.exp(Math.log(a.s) + (Math.log(to.s) - Math.log(a.s)) * k);
+    view.tilt = a.tilt + (to.tilt - a.tilt) * k;
+    view.cx = a.cx + (to.cx - a.cx) * k; view.cy = a.cy + (to.cy - a.cy) * k;
+    draw(); if (k < 1) anim = requestAnimationFrame(step);
   };
   anim = requestAnimationFrame(step);
 }
+function flyTo(x, y, s, ms = 900) {
+  // final center so that (x,y) lands a bit above screen middle
+  const keep = { ...view }; view.s = s; mat();
+  const [ux, uy] = linInv(0, -vh * 0.1); const to = { s, tilt: view.tilt, cx: x - ux, cy: y - uy };
+  Object.assign(view, keep); mat(); animate(to, ms);
+}
+function setTilt(t) { animate({ s: view.s, tilt: t, cx: view.cx, cy: view.cy }, 600); $('#zTilt').textContent = t ? '2D' : '3D'; }
 
 // ---------- drawing ----------
 let pending = false;
@@ -284,14 +298,16 @@ function logo(url) {
 let hits = [];
 function tierOf(f) { return f >= CFG.TIER_LEGEND ? 3 : f >= CFG.TIER_DISTRICT ? 2 : f >= 2 ? 1 : 0; }
 function shade(hex, k) { const [r, g, b] = hex2rgb(hex); const f = (v) => Math.max(0, Math.min(255, Math.round(v * k))); return `rgb(${f(r)},${f(g)},${f(b)})`; }
+const plotXY = (i) => [(i % cols + 0.5) * cell, ((i / cols) | 0) * cell + cell / 2];
 
 function render() {
   pending = false;
-  if (!isFinite(view.s) || !isFinite(view.x) || !isFinite(view.y) || view.s <= 0) Object.assign(view, fitCity());
+  if (!isFinite(view.s) || !isFinite(view.cx) || !isFinite(view.cy) || view.s <= 0) Object.assign(view, fitCity());
+  const { a, b, c, d, e, f } = mat();
   const s = view.s, cp = cell * s;
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx.fillStyle = '#E3DCCB'; ctx.fillRect(0, 0, vw, vh);
-  ctx.setTransform(dpr * s, 0, 0, dpr * s, -view.x * s * dpr, -view.y * s * dpr);
+  ctx.setTransform(dpr * a, dpr * b, dpr * c, dpr * d, dpr * e, dpr * f);
   ctx.lineJoin = 'round'; ctx.lineCap = 'round';
   ctx.fillStyle = '#F1EADA'; ctx.fill(paths.city);
   ctx.fillStyle = '#A9CF86'; ctx.fill(paths.green);
@@ -300,9 +316,12 @@ function render() {
   ctx.lineWidth = Math.max(28, 2.2 / s); ctx.stroke(paths.river);
   ctx.lineWidth = Math.max(12, 1.2 / s); ctx.stroke(paths.water);
 
-  // plots
-  const c0 = Math.max(0, Math.floor(view.x / cell)), c1 = Math.min(cols - 1, Math.floor(wx(vw) / cell));
-  const r0 = Math.max(0, Math.floor(view.y / cell)), r1 = Math.min(rows - 1, Math.floor(wy(vh) / cell));
+  // visible range
+  let wx0 = 1e9, wy0 = 1e9, wx1 = -1e9, wy1 = -1e9;
+  for (const [px, py] of [[0, 0], [vw, 0], [0, vh], [vw, vh]]) { const [x, y] = toW(px, py); wx0 = Math.min(wx0, x); wx1 = Math.max(wx1, x); wy0 = Math.min(wy0, y); wy1 = Math.max(wy1, y); }
+  const c0 = Math.max(0, Math.floor(wx0 / cell) - 1), c1 = Math.min(cols - 1, Math.floor(wx1 / cell) + 1);
+  const r0 = Math.max(0, Math.floor(wy0 / cell) - 1), r1 = Math.min(rows - 1, Math.floor(wy1 / cell) + 4);
+  const big = cp >= 12;
   if (cp < 7) {
     ctx.imageSmoothingEnabled = false;
     ctx.globalAlpha = cp < 2 ? 0.85 : 1;
@@ -310,23 +329,13 @@ function render() {
     ctx.globalAlpha = 1;
   } else {
     const ins = cell * 0.12, sz = cell - ins * 2;
-    for (let r = r0; r <= r1; r++) for (let c = c0; c <= c1; c++) {
-      const i = r * cols + c; if (!isPlot[i]) continue;
-      const x = c * cell + ins, y = r * cell + ins; const p = places.get(i);
-      if (p && (p.floors || 1) >= 2) { ctx.fillStyle = '#D8CFBD'; ctx.fillRect(x, y, sz, sz); continue; }
-      if (p) {
-        if (cp >= 16) { // house icon
-          const col = p.color || '#C8553D';
-          ctx.fillStyle = 'rgba(0,0,0,.12)'; ctx.fillRect(x + sz * 0.16, y + sz * 0.42, sz * 0.8, sz * 0.58);
-          ctx.fillStyle = '#FFFFFF'; ctx.fillRect(x + sz * 0.1, y + sz * 0.38, sz * 0.8, sz * 0.58);
-          ctx.fillStyle = col; ctx.beginPath(); ctx.moveTo(x, y + sz * 0.45); ctx.lineTo(x + sz / 2, y + sz * 0.02); ctx.lineTo(x + sz, y + sz * 0.45); ctx.closePath(); ctx.fill();
-          ctx.fillStyle = shade(col, 0.6); ctx.fillRect(x + sz * 0.42, y + sz * 0.68, sz * 0.16, sz * 0.28);
-        } else { ctx.fillStyle = p.color || '#C8553D'; ctx.fillRect(x, y, sz, sz); }
-      } else {
-        const z = priceColor(i); ctx.fillStyle = blocked[i] ? '#E1D9C8' : `rgb(${z[0]},${z[1]},${z[2]})`;
-        ctx.fillRect(x, y, sz, sz);
-        if (cp > 20) { ctx.strokeStyle = 'rgba(160,130,80,.25)'; ctx.lineWidth = 1 / s; ctx.strokeRect(x, y, sz, sz); }
-      }
+    for (let r = r0; r <= r1; r++) for (let cc = c0; cc <= c1; cc++) {
+      const i = r * cols + cc; if (!isPlot[i]) continue;
+      const x = cc * cell + ins, y = r * cell + ins; const p = places.get(i);
+      if (p) { ctx.fillStyle = big ? '#D8CFBD' : p.color || '#C8553D'; ctx.fillRect(x, y, sz, sz); continue; }
+      const z = priceColor(i); ctx.fillStyle = blocked[i] ? '#E1D9C8' : `rgb(${z[0]},${z[1]},${z[2]})`;
+      ctx.fillRect(x, y, sz, sz);
+      if (cp > 20) { ctx.strokeStyle = 'rgba(160,130,80,.25)'; ctx.lineWidth = 1 / s; ctx.strokeRect(x, y, sz, sz); }
     }
   }
   // roads
@@ -335,30 +344,48 @@ function render() {
   if (s > 0.035) { ctx.strokeStyle = '#D6CBB3'; ctx.lineWidth = Math.max(16, 2.6 / s); ctx.stroke(paths.r2); ctx.strokeStyle = '#FFFFFF'; ctx.lineWidth = Math.max(12, 1.6 / s); ctx.stroke(paths.r2); }
   ctx.strokeStyle = '#CFC2A6'; ctx.lineWidth = Math.max(24, 3.6 / s); ctx.stroke(paths.r1);
   ctx.strokeStyle = '#FFF8E8'; ctx.lineWidth = Math.max(18, 2.4 / s); ctx.stroke(paths.r1);
-  // borders
   ctx.strokeStyle = 'rgba(31,78,140,.55)'; ctx.lineWidth = 1.3 / s; ctx.setLineDash([6 / s, 5 / s]); ctx.stroke(paths.dist); ctx.setLineDash([]);
   ctx.strokeStyle = '#1F4E8C'; ctx.lineWidth = 2.5 / s; ctx.stroke(paths.city);
+  if (selected != null) {
+    const z = Math.max(cell, 12 / s), [x, y] = plotXY(selected);
+    ctx.strokeStyle = '#E4572E'; ctx.lineWidth = 3 / s; ctx.strokeRect(x - z / 2 - 2 / s, y - z / 2 - 2 / s, z + 4 / s, z + 4 / s);
+  }
 
   // ---- screen space ----
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   hits = [];
   const occ = [];
-  // landmarks
+  const onScreen = (x, y, m = 120) => x > -m && x < vw + m && y > -m && y < vh + m * 3;
   const lmLvl = s > 0.12 ? 0 : s > 0.035 ? 1 : 2;
+  const lmDraw = [];
   for (const l of LM) {
     if (l.lvl < lmLvl) continue;
-    const x = sx(l.x), y = sy(l.y); if (x < -100 || x > vw + 100 || y < -30 || y > vh + 30) continue;
+    const [x, y] = toS(l.x, l.y); if (!onScreen(x, y, 100)) continue;
+    lmDraw.push({ l, x, y });
+  }
+  // objects: buildings + houses
+  const obj = [];
+  for (const [i, p] of places) {
+    const fl = p.floors || 1, tier = tierOf(fl);
+    if (fl >= 2) { if (!(tier === 3 || (tier === 2 && s >= 0.04) || s >= 0.15)) continue; }
+    else if (!big) continue;
+    const [wx, wy] = plotXY(i); const [x, y] = toS(wx, wy);
+    if (!onScreen(x, y, 200)) continue;
+    obj.push({ i, p, fl, tier, x, y });
+  }
+  obj.sort((u, v) => u.y - v.y);
+  for (const o of obj) o.fl >= 2 ? drawTower(o, s, cp) : drawHouse(o, cp);
+  for (const { l, x, y } of lmDraw) {
     const r = l.lvl === 2 ? 8 : 6;
     ctx.beginPath(); ctx.arc(x, y, r, 0, 7); ctx.fillStyle = '#E4572E'; ctx.fill(); ctx.lineWidth = 2.5; ctx.strokeStyle = '#fff'; ctx.stroke();
     const pb = l.side === 'l' ? pill(l.n, x - r - 4, y, 'right', '#fff', '#1E1A14', l.lvl === 2 ? 12 : 11) : pill(l.n, x + r + 4, y, 'left', '#fff', '#1E1A14', l.lvl === 2 ? 12 : 11);
-    occ.push(pb);
-    hits.push({ x0: x - 10, y0: y - 10, x1: x + 10, y1: y + 10, lm: l });
+    occ.push(pb); hits.push({ x0: x - 10, y0: y - 10, x1: x + 10, y1: y + 10, lm: l });
   }
   if (s < 0.09) {
     ctx.font = '600 11px Unbounded, sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-    for (const d of C.dist) {
-      const x = sx(d.cx), y = sy(d.cy); if (x < -80 || x > vw + 80 || y < -20 || y > vh + 20) continue;
-      const txt = d.n.toUpperCase(); const w = ctx.measureText(txt).width;
+    for (const dd of C.dist) {
+      const [x, y] = toS(dd.cx, dd.cy); if (!onScreen(x, y, 80)) continue;
+      const txt = dd.n.toUpperCase(); const w = ctx.measureText(txt).width;
       const box = { x0: x - w / 2 - 3, y0: y - 9, x1: x + w / 2 + 3, y1: y + 9 };
       if (occ.some((o) => box.x0 < o.x1 && box.x1 > o.x0 && box.y0 < o.y1 && box.y1 > o.y0)) continue;
       occ.push(box);
@@ -366,32 +393,13 @@ function render() {
       ctx.fillStyle = '#163A69'; ctx.fillText(txt, x, y);
     }
   }
-  // buildings (floors >= 2)
-  const bl = [];
-  for (const [i, p] of places) {
-    const f = p.floors || 1; if (f < 2) continue;
-    const tier = tierOf(f);
-    const vis = tier === 3 || (tier === 2 && s >= 0.04) || s >= 0.15;
-    if (!vis) continue;
-    const x = sx((i % cols + 0.5) * cell), y = sy(((i / cols) | 0) * cell + cell * 0.9);
-    if (x < -150 || x > vw + 150 || y < -40 || y > vh + 400) continue;
-    bl.push({ i, p, f, tier, x, y });
-  }
-  bl.sort((a, b) => a.y - b.y);
-  for (const b of bl) drawTower(b, s, cp);
-  // nick labels
   if (cp >= 26) {
     ctx.font = '600 10px Inter, sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'top';
-    for (let r = r0; r <= r1; r++) for (let c = c0; c <= c1; c++) {
-      const i = r * cols + c; const p = places.get(i); if (!p || (p.floors || 1) >= 2 || !p.nick) continue;
-      const x = sx((c + 0.5) * cell), y = sy((r + 1) * cell) + 1;
-      ctx.lineWidth = 3; ctx.strokeStyle = 'rgba(255,255,255,.95)'; ctx.strokeText('@' + p.nick, x, y); ctx.fillStyle = '#1E1A14'; ctx.fillText('@' + p.nick, x, y);
+    for (const o of obj) {
+      if (o.fl >= 2 || !o.p.nick) continue;
+      const y = o.y + cp * 0.42 * (1 - view.tilt * 0.45) + 2;
+      ctx.lineWidth = 3; ctx.strokeStyle = 'rgba(255,255,255,.95)'; ctx.strokeText('@' + o.p.nick, o.x, y); ctx.fillStyle = '#1E1A14'; ctx.fillText('@' + o.p.nick, o.x, y);
     }
-  }
-  // selection
-  if (selected != null) {
-    const x = sx((selected % cols) * cell), y = sy(((selected / cols) | 0) * cell), z = Math.max(cp, 10);
-    ctx.strokeStyle = '#E4572E'; ctx.lineWidth = 3; ctx.strokeRect(x - (z - cp) / 2 - 2, y - (z - cp) / 2 - 2, z + 4, z + 4);
   }
 }
 function pill(txt, x, y, align, bg, fg, size = 11, border) {
@@ -403,35 +411,67 @@ function pill(txt, x, y, align, bg, fg, size = 11, border) {
   return { x0, y0: y - h / 2, x1: x0 + w, y1: y + h / 2 };
 }
 function roundRect(x, y, w, h, r) { ctx.beginPath(); ctx.moveTo(x + r, y); ctx.arcTo(x + w, y, x + w, y + h, r); ctx.arcTo(x + w, y + h, x, y + h, r); ctx.arcTo(x, y + h, x, y, r); ctx.arcTo(x, y, x + w, y, r); ctx.closePath(); }
-function drawTower(b, s, cp) {
-  const { p, f, tier, x, y } = b;
-  const col = p.color || '#1F4E8C';
-  const bw = tier === 3 ? Math.max(16, Math.min(cp * 0.85, 70)) : Math.max(10, Math.min(cp * 0.8, 60));
-  const k = Math.max(tier === 3 ? 0.9 : 0.7, Math.min(s * 4, 3.2));
-  const h = Math.min(f * k + 6, tier === 3 ? 260 : 180);
-  const d = bw * 0.35;
-  const x0 = x - bw / 2, y0 = y - h;
-  ctx.fillStyle = 'rgba(0,0,0,.18)'; ctx.beginPath(); ctx.ellipse(x + d / 2, y, bw * 0.75, bw * 0.22, 0, 0, 7); ctx.fill();
-  ctx.fillStyle = shade(col, 0.62); ctx.beginPath(); ctx.moveTo(x0 + bw, y0); ctx.lineTo(x0 + bw + d, y0 - d); ctx.lineTo(x0 + bw + d, y - d); ctx.lineTo(x0 + bw, y); ctx.closePath(); ctx.fill();
-  ctx.fillStyle = shade(col, 1.25); ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x0 + d, y0 - d); ctx.lineTo(x0 + bw + d, y0 - d); ctx.lineTo(x0 + bw, y0); ctx.closePath(); ctx.fill();
-  ctx.fillStyle = col; ctx.fillRect(x0, y0, bw, h);
-  if (h > 26 && bw > 12) { // windows
-    ctx.fillStyle = 'rgba(255,255,255,.28)';
-    const rowsN = Math.min(Math.floor(h / 7), 60);
-    for (let r = 1; r < rowsN; r++) { const yy = y0 + r * (h / rowsN); ctx.fillRect(x0 + bw * 0.15, yy, bw * 0.7, Math.max(1, h / rowsN * 0.35)); }
+// base corners of a plot on screen, scaled around its center
+function base(i, half) {
+  const [wx, wy] = plotXY(i);
+  return [[wx - half, wy - half], [wx + half, wy - half], [wx + half, wy + half], [wx - half, wy + half]].map(([x, y]) => toS(x, y));
+}
+function poly(pts) { ctx.beginPath(); pts.forEach(([x, y], k) => (k ? ctx.lineTo(x, y) : ctx.moveTo(x, y))); ctx.closePath(); }
+// extruded box: returns top corners
+function prism(P, h, col, windows) {
+  for (let k = 0; k < 4; k++) {
+    const A = P[k], B = P[(k + 1) % 4]; const nx = B[1] - A[1], ny = -(B[0] - A[0]);
+    if (ny <= 0.01) continue;
+    poly([A, B, [B[0], B[1] - h], [A[0], A[1] - h]]); ctx.fillStyle = shade(col, nx < 0 ? 0.72 : 0.9); ctx.fill();
+    if (windows && h > 26) {
+      ctx.strokeStyle = 'rgba(255,255,255,.28)'; ctx.lineWidth = Math.max(1, Math.min(3, h / 60));
+      const n = Math.min(Math.floor(h / 7), 60);
+      ctx.beginPath();
+      for (let r = 1; r < n; r++) { const dy = h * r / n; const m = 0.15; ctx.moveTo(A[0] + (B[0] - A[0]) * m, A[1] + (B[1] - A[1]) * m - dy); ctx.lineTo(A[0] + (B[0] - A[0]) * (1 - m), A[1] + (B[1] - A[1]) * (1 - m) - dy); }
+      ctx.stroke();
+    }
   }
+  const top = P.map(([x, y]) => [x, y - h]);
+  poly(top); ctx.fillStyle = shade(col, 1.18); ctx.fill();
+  return top;
+}
+function drawHouse(o, cp) {
+  const P = base(o.i, cell * 0.3); const col = o.p.color || '#C8553D';
+  const wall = Math.max(3, cp * 0.22) * (0.5 + view.tilt * 0.5) + (1 - view.tilt) * cp * 0.12;
+  ctx.fillStyle = 'rgba(0,0,0,.12)'; poly(P); ctx.fill();
+  const top = prism(P, wall, '#F4EFE6', false);
+  // pyramid roof
+  const cx = top.reduce((s0, q) => s0 + q[0], 0) / 4, cy = top.reduce((s0, q) => s0 + q[1], 0) / 4 - cp * 0.22;
+  for (let k = 0; k < 4; k++) {
+    const A = top[k], B = top[(k + 1) % 4]; const nx = B[1] - A[1], ny = -(B[0] - A[0]);
+    poly([A, B, [cx, cy]]); ctx.fillStyle = shade(col, ny > 0 ? (nx < 0 ? 0.8 : 1) : 1.15); ctx.fill();
+  }
+  hits.push({ x0: Math.min(...P.map((q) => q[0])), y0: cy, x1: Math.max(...P.map((q) => q[0])), y1: Math.max(...P.map((q) => q[1])), plot: o.i });
+}
+function drawTower(o, s, cp) {
+  const { p, fl, tier } = o; const col = p.color || '#1F4E8C';
+  const minPx = tier === 3 ? 16 : 11;
+  const half = Math.max(cell * 0.4, (minPx / 2) / s);
+  const P = base(o.i, Math.min(half, cell * 0.4 * Math.max(1, (minPx / 2) / (cell * 0.4 * s))));
+  const k = Math.max(tier === 3 ? 0.9 : 0.7, Math.min(s * 4, 3.2));
+  const h = Math.min(fl * k + 6, tier === 3 ? 260 : 180);
+  ctx.fillStyle = 'rgba(0,0,0,.16)'; poly(P); ctx.fill();
+  const top = prism(P, h, col, true);
+  const xs = P.concat(top).map((q) => q[0]), ys = P.concat(top).map((q) => q[1]);
+  let box = { x0: Math.min(...xs), y0: Math.min(...ys), x1: Math.max(...xs), y1: Math.max(...ys) };
+  const tx = (box.x0 + box.x1) / 2;
   const im = logo(p.logo_url);
-  if (im && bw >= 14) { const ls = bw * 0.8; ctx.fillStyle = '#fff'; ctx.fillRect(x0 + bw * 0.1, y0 + 4, ls, ls); ctx.drawImage(im, x0 + bw * 0.1 + 1, y0 + 5, ls - 2, ls - 2); }
+  const bw = box.x1 - box.x0;
+  if (im && bw >= 14) { const ls = Math.min(bw * 0.7, 48); ctx.fillStyle = '#fff'; ctx.fillRect(tx - ls / 2 - 1, box.y0 - ls - 3, ls + 2, ls + 2); ctx.drawImage(im, tx - ls / 2, box.y0 - ls - 2, ls, ls); box.y0 -= ls + 4; }
   const showLabel = tier === 3 || (tier === 2 && s >= 0.04) || s >= 0.3;
-  let box = { x0: x0, y0: y0 - d, x1: x0 + bw + d, y1: y };
   if (showLabel) {
     const name = p.name || (p.nick ? '@' + p.nick : '');
     if (name) {
-      const pb = pill(name, x + d / 2, y0 - d - 12, 'center', tier === 3 ? '#1F4E8C' : '#fff', tier === 3 ? '#fff' : '#1E1A14', tier === 3 ? 12 : 11, tier === 3 ? null : '#1F4E8C');
-      box = { x0: Math.min(box.x0, pb.x0), y0: pb.y0, x1: Math.max(box.x1, pb.x1), y1: y };
+      const pb = pill(name, tx, box.y0 - 12, 'center', tier === 3 ? '#1F4E8C' : '#fff', tier === 3 ? '#fff' : '#1E1A14', tier === 3 ? 12 : 11, tier === 3 ? null : '#1F4E8C');
+      box = { x0: Math.min(box.x0, pb.x0), y0: pb.y0, x1: Math.max(box.x1, pb.x1), y1: box.y1 };
     }
   }
-  hits.push({ ...box, plot: b.i });
+  hits.push({ ...box, plot: o.i });
 }
 
 // ---------- input ----------
@@ -444,10 +484,12 @@ cv.addEventListener('pointerdown', (e) => {
   gesture = snapshot(); cv.classList.add('drag');
 });
 function snapshot() {
+  mat();
   const ps = [...ptrs.values()];
-  if (ps.length === 1) return { mode: 'pan', x: ps[0].x, y: ps[0].y, vx: view.x, vy: view.y };
-  const [a, b] = ps; const cx = (a.x + b.x) / 2, cy = (a.y + b.y) / 2;
-  return { mode: 'pinch', d: Math.hypot(a.x - b.x, a.y - b.y), s: view.s, wxm: wx(cx), wym: wy(cy) };
+  if (ps.length === 1) return { mode: 'pan', x: ps[0].x, y: ps[0].y, cx: view.cx, cy: view.cy };
+  const [p1, p2] = ps; const mx = (p1.x + p2.x) / 2, my = (p1.y + p2.y) / 2;
+  const [wx, wy] = toW(mx, my);
+  return { mode: 'pinch', d: Math.hypot(p1.x - p2.x, p1.y - p2.y), s: view.s, wx, wy };
 }
 cv.addEventListener('pointermove', (e) => {
   if (!ptrs.has(e.pointerId)) return;
@@ -455,11 +497,12 @@ cv.addEventListener('pointermove', (e) => {
   if (downInfo && Math.hypot(e.clientX - downInfo.x, e.clientY - downInfo.y) > 8) downInfo.moved = true;
   const ps = [...ptrs.values()];
   if (gesture.mode === 'pan' && ps.length === 1) {
-    view.x = gesture.vx - (ps[0].x - gesture.x) / view.s; view.y = gesture.vy - (ps[0].y - gesture.y) / view.s; draw();
+    mat(); const [ux, uy] = linInv(ps[0].x - gesture.x, ps[0].y - gesture.y);
+    view.cx = gesture.cx - ux; view.cy = gesture.cy - uy; draw();
   } else if (gesture.mode === 'pinch' && ps.length >= 2 && gesture.d > 10) {
-    const [a, b] = ps; const cx = (a.x + b.x) / 2, cy = (a.y + b.y) / 2;
-    const ns = Math.max(minS, Math.min(maxS, gesture.s * Math.hypot(a.x - b.x, a.y - b.y) / gesture.d));
-    view.s = ns; view.x = gesture.wxm - cx / ns; view.y = gesture.wym - cy / ns; draw();
+    const [p1, p2] = ps; const mx = (p1.x + p2.x) / 2, my = (p1.y + p2.y) / 2;
+    view.s = clampS(gesture.s * Math.hypot(p1.x - p2.x, p1.y - p2.y) / gesture.d);
+    anchor(gesture.wx, gesture.wy, mx, my); draw();
   }
 });
 let lastTap = 0;
@@ -479,7 +522,8 @@ cv.addEventListener('pointerup', up); cv.addEventListener('pointercancel', up);
 cv.addEventListener('wheel', (e) => { e.preventDefault(); zoomAt(e.clientX, e.clientY, Math.exp(-e.deltaY * 0.0018)); }, { passive: false });
 $('#zIn').onclick = () => zoomAt(vw / 2, vh / 2, 1.8);
 $('#zOut').onclick = () => zoomAt(vw / 2, vh / 2, 1 / 1.8);
-$('#zHome').onclick = () => { const f = fitCity(); flyTo(f.x + vw / 2 / f.s, f.y + (vh / 2 - 40) / f.s, f.s); };
+$('#zHome').onclick = () => { const f = fitCity(); animate({ ...f, tilt: view.tilt }, 900); };
+$('#zTilt').onclick = () => setTilt(view.tilt > 0.5 ? 0 : 1);
 
 function tap(px, py) {
   for (let k = hits.length - 1; k >= 0; k--) {
@@ -489,15 +533,16 @@ function tap(px, py) {
       selectPlot(h.plot); return;
     }
   }
-  const c = Math.floor(wx(px) / cell), r = Math.floor(wy(py) / cell);
+  mat(); const [x, y] = toW(px, py);
+  const c = Math.floor(x / cell), r = Math.floor(y / cell);
   if (c < 0 || r < 0 || c >= cols || r >= rows) return;
   let i = r * cols + c;
-  if (!isPlot[i]) { // snap to nearest plot within 1 cell when zoomed out
+  if (!isPlot[i]) {
     let best = -1, bd = 1e9; const rad = cell * view.s < 8 ? 3 : 1;
     for (let dr = -rad; dr <= rad; dr++) for (let dc = -rad; dc <= rad; dc++) { const j = (r + dr) * cols + c + dc; if (j >= 0 && j < cols * rows && isPlot[j] && dr * dr + dc * dc < bd) { bd = dr * dr + dc * dc; best = j; } }
     if (best < 0) { selected = null; draw(); return; } i = best;
   }
-  if (cell * view.s < 6) { toast(t('zoom_in_more')); flyTo((i % cols + 0.5) * cell, ((i / cols | 0) + 0.5) * cell, Math.max(view.s * 3, 0.2), 600); return; }
+  if (cell * view.s < 6) { toast(t('zoom_in_more')); const [wx, wy] = plotXY(i); flyTo(wx, wy, Math.max(view.s * 3, 0.2), 600); return; }
   selectPlot(i);
 }
 
@@ -653,7 +698,7 @@ function buyForm(i, place) {
 
 $('#btnClaim').onclick = () => claimForm();
 $('#btnSearch').onclick = () => searchForm();
-$('#btnBuy').onclick = () => { closeSheet(); pickMode = true; toast(t('pick_plot')); if (view.s < 0.12) flyTo(LM[0].x, LM[0].y, 0.25, 900); };
+$('#btnBuy').onclick = () => { closeSheet(); toast(t('pick_plot')); if (view.s < 0.12) flyTo(LM[0].x, LM[0].y, 0.25, 900); };
 
 // ---------- boot ----------
 (async function boot() {
